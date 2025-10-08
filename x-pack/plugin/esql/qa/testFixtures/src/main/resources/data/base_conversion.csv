@@ -26,3 +26,27 @@ group:integer,string:keyword,base:integer,expect_long:long,expect_integer:intege
 // │   │  │   │   ┌─── notes          - comments on the test
 // ▼   ▼  ▼   ▼   ▼
 0,0xff,16,255,255,                TO_LONG("0x32". 16)            == 50
+//
+//
+// Test Group 1
+//
+//     from GitHub issue https://github.com/elastic/elasticsearch/issues/133728
+//     This is for converting a string value to a number given a base.
+//     Something similar to what ES EQL does:
+//     https://www.elastic.co/docs/reference/query-languages/eql/eql-function-ref#eql-fn-number
+//     
+//         number("0x32", 16)
+//         number("31", 13)
+//         number("5")
+//             
+//     note when the binary TO_LONG function is given a null base it is treated as a unary function
+//     e.g TO_LONG("5",null) == TO_LONG("5") 
+//          
+//     Note also use of '.' in lieu of ',' in notes field below because ',' is also the csv-spec field separator
+//     e.g so in the notes TO_LONG("5", 16) is written as TO_LONG("5". 16)
+//     todo: see if we can use \,
+//      
+//      
+1,0x32,16,50,50,                TO_LONG("0x32". 16)            == 50
+1,31,13,25,25,                  TO_LONG("31". 13)              == 25
+1,5,,5,5,                       TO_LONG("5". null)             == 5

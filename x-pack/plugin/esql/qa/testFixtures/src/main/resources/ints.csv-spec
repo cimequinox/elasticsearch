@@ -179,6 +179,20 @@ string:keyword |base:integer |expect_long:long
 0xff           |16           |255
 ;
 
+convertStringToLongBaseIndexGroup1
+
+  FROM  base_conversion
+| WHERE group == 1
+| EVAL  to_long = TO_LONG(string, base)
+| KEEP  string, base, to_long
+;
+
+string:keyword |base:integer |to_long:long
+0x32           |16           |50
+31             |13           |25
+5              |null         |5
+;
+
 // END esql_to_long_base_133728
 
 convertDoubleToLong

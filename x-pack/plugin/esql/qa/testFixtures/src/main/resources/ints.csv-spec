@@ -169,6 +169,7 @@ str1:keyword |str2:keyword |str3:keyword |long1:long  |long2:long |long3:long
 // see comments for each group in base_conversion.csv
 
 convertStringToLongBaseIndexGroup0
+required_capability: to_long_base
 
   FROM  base_conversion
 | WHERE group == 0
@@ -180,6 +181,7 @@ string:keyword |base:integer |expect_long:long
 ;
 
 convertStringToLongBaseIndexGroup1
+required_capability: to_long_base
 
   FROM  base_conversion
 | WHERE group == 1
@@ -189,8 +191,8 @@ convertStringToLongBaseIndexGroup1
 
 string:keyword |base:integer |to_long:long
 0x32           |16           |50
-31             |13           |25
-5              |null         |5
+31             |13           |40
+5              |null         |null
 ;
 
 // END esql_to_long_base_133728

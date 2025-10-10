@@ -1499,7 +1499,12 @@ public class EsqlCapabilities {
         /**
          * Support for dots in FUSE attributes
          */
-        DOTS_IN_FUSE;
+        DOTS_IN_FUSE,
+
+        /**
+         * Support for base conversion in TO_LONG
+         */
+        TO_LONG_BASE;
 
         private final boolean enabled;
 

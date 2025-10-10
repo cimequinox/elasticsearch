@@ -77,27 +77,27 @@ public final class ToLongBaseEvaluator implements EvalOperator.ExpressionEvaluat
     try(LongBlock.Builder result = driverContext.blockFactory().newLongBlockBuilder(positionCount)) {
       BytesRef inScratch = new BytesRef();
       position: for (int p = 0; p < positionCount; p++) {
-        if (inBlock.isNull(p)) {
-          result.appendNull();
-          continue position;
+        switch (inBlock.getValueCount(p)) {
+          case 0:
+              result.appendNull();
+              continue position;
+          case 1:
+              break;
+          default:
+              warnings().registerException(new IllegalArgumentException("single-value function encountered multi-value"));
+              result.appendNull();
+              continue position;
         }
-        if (inBlock.getValueCount(p) != 1) {
-          if (inBlock.getValueCount(p) > 1) {
-            warnings().registerException(new IllegalArgumentException("single-value function encountered multi-value"));
-          }
-          result.appendNull();
-          continue position;
-        }
-        if (radixBlock.isNull(p)) {
-          result.appendNull();
-          continue position;
-        }
-        if (radixBlock.getValueCount(p) != 1) {
-          if (radixBlock.getValueCount(p) > 1) {
-            warnings().registerException(new IllegalArgumentException("single-value function encountered multi-value"));
-          }
-          result.appendNull();
-          continue position;
+        switch (radixBlock.getValueCount(p)) {
+          case 0:
+              result.appendNull();
+              continue position;
+          case 1:
+              break;
+          default:
+              warnings().registerException(new IllegalArgumentException("single-value function encountered multi-value"));
+              result.appendNull();
+              continue position;
         }
         BytesRef in = inBlock.getBytesRef(inBlock.getFirstValueIndex(p), inScratch);
         int radix = radixBlock.getInt(radixBlock.getFirstValueIndex(p));

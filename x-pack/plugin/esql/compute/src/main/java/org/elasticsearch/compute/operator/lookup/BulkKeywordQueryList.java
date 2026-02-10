@@ -15,41 +15,52 @@ import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.compute.data.Block;
 import org.elasticsearch.compute.data.BytesRefBlock;
+import org.elasticsearch.compute.data.ElementType;
 import org.elasticsearch.compute.data.IntVector;
+import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.compute.operator.Warnings;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.query.SearchExecutionContext;
 import org.elasticsearch.search.internal.AliasFilter;
 
-import java.util.function.IntFunction;
+import java.util.function.BiFunction;
+
+//
+// TODO: this class doesn't inherit/implement QueryList methods
+//   (e.g. onlySingleValues, doGetQuery)
+//
+// consider inlining into EnrichQuerySourceOperator or renaming
+//   after examining conventions followed by other operators.
+//
 
 public class BulkKeywordQueryList {
     private final MappedFieldType rightFieldType;
+    private final int channelOffset;
     private final SearchExecutionContext context;
-    private final BytesRefBlock block;
     private final ClusterService clusterService;
     private final AliasFilter aliasFilter;
     private final Warnings warnings;
     private final String fieldName;
-    private final IntFunction<Object> blockValueReader;
+    private final BiFunction<Block, Integer, Object> blockValueReader;
+
 
     public BulkKeywordQueryList(
         MappedFieldType rightFieldType,
+        ElementType leftElementType,
         SearchExecutionContext context,
-        Block block,
+        int channelOffset,
         ClusterService clusterService,
         AliasFilter aliasFilter,
         Warnings warnings
     ) {
         this.rightFieldType = rightFieldType;
+        this.channelOffset = channelOffset;
         this.context = context;
-        this.block = (BytesRefBlock) block;
         this.clusterService = clusterService;
         this.aliasFilter = aliasFilter;
         this.warnings = warnings;
         this.fieldName = rightFieldType.name();
-        this.blockValueReader = QueryList.createBlockValueReader(block);
-
+        this.blockValueReader = QueryList.createBlockValueReaderForType(leftElementType);
     }
 
     /**
@@ -58,12 +69,14 @@ public class BulkKeywordQueryList {
      * the inverted index using TermsEnum and PostingsEnum for maximum performance.
      */
     public int processQuery(
+        Page inputPage,
         int position,
         IndexReader indexReader,
         IntVector.Builder docsBuilder,
         IntVector.Builder segmentsBuilder,
         IntVector.Builder positionsBuilder
     ) {
+        BytesRefBlock block = inputPage.getBlock(channelOffset);
         try {
             final int valueCount = block.getValueCount(position);
             if (valueCount != 1) {
@@ -95,7 +108,8 @@ public class BulkKeywordQueryList {
         }
     }
 
-    public int getPositionCount() {
+    public int getPositionCount(Page inputPage) {
+        Block block = inputPage.getBlock(channelOffset);
         return block.getPositionCount();
     }
 }

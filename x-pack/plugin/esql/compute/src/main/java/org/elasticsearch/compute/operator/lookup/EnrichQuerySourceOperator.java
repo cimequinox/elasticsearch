@@ -147,7 +147,7 @@ public final class EnrichQuerySourceOperator extends SourceOperator {
                 segmentsBuilder = blockFactory.newIntVectorBuilder(estimatedSize);
             }
             if (queryList.getBulkQueryList() != null) {
-                return processBulkQueries(positionsBuilder, segmentsBuilder, docsBuilder);
+                return processBulkQueries(inputPage, positionsBuilder, segmentsBuilder, docsBuilder);
             }
             int totalMatches = 0;
             do {
@@ -196,12 +196,15 @@ public final class EnrichQuerySourceOperator extends SourceOperator {
         }
     }
 
-    private Page processBulkQueries(IntVector.Builder positionsBuilder, IntVector.Builder segmentsBuilder, IntVector.Builder docsBuilder) {
+    private Page processBulkQueries(Page inputPage,
+                                    IntVector.Builder positionsBuilder,
+                                    IntVector.Builder segmentsBuilder,
+                                    IntVector.Builder docsBuilder) {
         queryPosition++;
         BulkKeywordQueryList bulkQueryList = queryList.getBulkQueryList();
         int totalMatches = 0;
-        while (queryPosition < queryList.getPositionCount() && totalMatches < maxPageSize) {
-            int matches = bulkQueryList.processQuery(queryPosition, indexReader, docsBuilder, segmentsBuilder, positionsBuilder);
+        while (queryPosition < queryList.getPositionCount(inputPage) && totalMatches < maxPageSize) {
+            int matches = bulkQueryList.processQuery(inputPage, queryPosition, indexReader, docsBuilder, segmentsBuilder, positionsBuilder);
             totalMatches += matches;
             queryPosition++;
         }

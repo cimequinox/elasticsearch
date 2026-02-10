@@ -17,7 +17,6 @@ import org.elasticsearch.compute.operator.Warnings;
 import org.elasticsearch.compute.operator.lookup.BulkKeywordQueryList;
 import org.elasticsearch.compute.operator.lookup.LookupEnrichQueryGenerator;
 import org.elasticsearch.compute.operator.lookup.QueryList;
-import org.elasticsearch.index.mapper.KeywordFieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.Rewriteable;
@@ -160,7 +159,7 @@ public class ExpressionQueryList implements LookupEnrichQueryGenerator {
         Warnings warnings
     ) {
         List<Expression> expressions = Predicates.splitAnd(joinOnConditions);
-        if (applyAsFastKeywordFilter(expressions, matchFields, inputPage, clusterService, warnings)) {
+        if (applyAsFastKeywordFilter(expressions, matchFields, context, clusterService, warnings)) {
             // we managed to apply the whole condition as a fast keyword filter
             return;
         }
@@ -175,10 +174,11 @@ public class ExpressionQueryList implements LookupEnrichQueryGenerator {
         }
     }
 
+
     private boolean applyAsFastKeywordFilter(
         List<Expression> expressions,
         List<MatchConfig> matchFields,
-        Page inputPage,
+        SearchExecutionContext context,
         ClusterService clusterService,
         Warnings warnings
     ) {
@@ -190,33 +190,35 @@ public class ExpressionQueryList implements LookupEnrichQueryGenerator {
                 // the left side comes from the page that was sent to the lookup node
                 // the right side is the field from the lookup index
                 // check if the left side is in the matchFields
-                // if it is its corresponding page is the corresponding number in inputPage
-                Block block = null;
+
                 DataType dataType = null;
+                int channelOffset = -1;
                 for (int i = 0; i < matchFields.size(); i++) {
                     if (matchFields.get(i).fieldName().equals(leftAttribute.name())) {
-                        block = inputPage.getBlock(i);
+                        channelOffset = i;
                         dataType = matchFields.get(i).type();
                         break;
                     }
                 }
-                MappedFieldType rightFieldType = context.getFieldType(rightAttribute.name());
-                if (rightFieldType instanceof KeywordFieldMapper.KeywordFieldType == false) {
-                    return false;
-                }
-                if (block != null && rightFieldType != null && dataType != null) {
-                    // special handle Equals operator on keyword fields
-                    // we can apply as a BulkKeywordQueryList for better performance
-                    if (binaryComparison instanceof Equals equals) {
-                        bulkKeywordQueryList = new BulkKeywordQueryList(
-                            rightFieldType,
-                            context,
-                            block,
-                            clusterService,
-                            aliasFilter,
-                            warnings
-                        );
-                        return true;
+
+                if (channelOffset != -1 && dataType == DataType.KEYWORD) {
+                    MappedFieldType rightFieldType = context.getFieldType(rightAttribute.name());
+                    if (rightFieldType != null) {
+                        // special handle Equals operator on keyword fields
+                        // we can apply as a BulkKeywordQueryList for better performance
+                        if (binaryComparison instanceof Equals) {
+                            ElementType leftElementType = PlannerUtils.toElementType(dataType);
+                            bulkKeywordQueryList = new BulkKeywordQueryList(
+                                rightFieldType,
+                                leftElementType,
+                                context,
+                                channelOffset,
+                                clusterService,
+                                aliasFilter,
+                                warnings
+                            );
+                            return true;
+                        }
                     }
                 }
             }
@@ -379,7 +381,7 @@ public class ExpressionQueryList implements LookupEnrichQueryGenerator {
     public int getPositionCount(Page inputPage) {
 
         if (bulkKeywordQueryList != null) {
-            return bulkKeywordQueryList.getPositionCount();
+            return bulkKeywordQueryList.getPositionCount(inputPage);
         }
 
         int positionCount = queryLists.get(0).getPositionCount(inputPage);

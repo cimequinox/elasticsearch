@@ -9,6 +9,7 @@ package org.elasticsearch.xpack.esql.enrich;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.lucene.search.Query;
 import org.elasticsearch.TransportVersion;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
@@ -22,6 +23,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.compute.data.BlockFactory;
 import org.elasticsearch.compute.data.BlockStreamInput;
+import org.elasticsearch.compute.data.ElementType;
 import org.elasticsearch.compute.data.LocalCircuitBreaker;
 import org.elasticsearch.compute.data.Page;
 import org.elasticsearch.compute.operator.DriverContext;
@@ -31,11 +33,13 @@ import org.elasticsearch.compute.operator.exchange.BidirectionalBatchExchangeSer
 import org.elasticsearch.compute.operator.exchange.ExchangeService;
 import org.elasticsearch.compute.operator.exchange.ExchangeSourceOperator;
 import org.elasticsearch.compute.operator.lookup.BlockOptimization;
+import org.elasticsearch.compute.operator.lookup.BulkKeywordLookup;
 import org.elasticsearch.compute.operator.lookup.LookupEnrichQueryGenerator;
 import org.elasticsearch.compute.operator.lookup.QueryList;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.Releasables;
+import org.elasticsearch.index.mapper.KeywordFieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.SearchExecutionContext;
@@ -76,6 +80,7 @@ import org.elasticsearch.xpack.esql.plan.physical.PhysicalPlan;
 import org.elasticsearch.xpack.esql.plan.physical.ProjectExec;
 import org.elasticsearch.xpack.esql.planner.LocalExecutionPlanner;
 import org.elasticsearch.xpack.esql.planner.PlannerSettings;
+import org.elasticsearch.xpack.esql.planner.PlannerUtils;
 import org.elasticsearch.xpack.esql.planner.mapper.LocalMapper;
 import org.elasticsearch.xpack.esql.plugin.EsqlFlags;
 import org.elasticsearch.xpack.esql.plugin.QueryPragmas;
@@ -209,6 +214,22 @@ public class LookupFromIndexService extends AbstractLookupService<LookupFromInde
         Warnings warnings
     ) {
         if (joinOnConditions == null) {
+
+            if (matchFields.size() == 1 && rightOnlyFilter == null && pushedQuery == null) {
+                // we have a single field, see if we can use the BulkKeywordLookup optimization
+                MatchConfig matchField = matchFields.get(0);
+                LookupEnrichQueryGenerator bulkQueryList = bulkKeywordQueryList(
+                    matchField,
+                    extractFieldNames,
+                    context,
+                    aliasFilter,
+                    warnings
+                );
+                if (bulkQueryList != null) {
+                    return bulkQueryList;
+                }
+            }
+
             List<QueryList> queryLists = new ArrayList<>();
             for (int i = 0; i < matchFields.size(); i++) {
                 MatchConfig matchField = matchFields.get(i);
@@ -233,6 +254,66 @@ public class LookupFromIndexService extends AbstractLookupService<LookupFromInde
                 warnings
             );
         }
+    }
+
+    /**
+     * Returns a new {@link LookupEnrichQueryGenerator} if lookup join optimization for a single keyword field applies.
+     * Returns null if optimization does not apply.
+     */
+    private LookupEnrichQueryGenerator bulkKeywordQueryList(
+        MatchConfig matchField,
+        List<String> extractFieldNames,
+        SearchExecutionContext context,
+        AliasFilter aliasFilter,
+        Warnings warnings
+    ) {
+        // We can't (yet) use optimization when an AliasFilter is in effect
+        if (aliasFilter != null && aliasFilter != AliasFilter.EMPTY) return null;
+
+        // We can only use optimization on KEYWORD fields
+        DataType dataType = matchField.type();
+        if (dataType != DataType.KEYWORD) return null;
+
+        MappedFieldType rightFieldType = context.getFieldType(matchField.fieldName());
+        if ((rightFieldType instanceof KeywordFieldMapper.KeywordFieldType) == false) return null;
+
+        // extract fields must contain the match field
+        int extractChannelOffset = -1;
+        for (int i = 0; i < extractFieldNames.size(); i++) {
+            if (extractFieldNames.get(i).equals(matchField.fieldName())) {
+                extractChannelOffset = i;
+                break;
+            }
+        }
+        if (extractChannelOffset == -1) return null;
+
+        int matchChannelOffset = matchField.channel();
+        ElementType leftElementType = PlannerUtils.toElementType(dataType);
+
+        BulkKeywordLookup bulkLookup = new BulkKeywordLookup(
+            rightFieldType,
+            leftElementType,
+            context,
+            matchChannelOffset,
+            extractChannelOffset,
+            clusterService,
+            aliasFilter,
+            warnings
+        );
+
+        return new LookupEnrichQueryGenerator() {
+            public Query getQuery(int position, Page inputPage, SearchExecutionContext searchExecutionContext) {
+                throw new IllegalStateException("BulkKeywordLookup optimization does not support getQuery");
+            }
+
+            public int getPositionCount(Page inputPage) {
+                return inputPage.getBlock(matchChannelOffset).getPositionCount();
+            }
+
+            public BulkKeywordLookup getBulkKeywordLookup() {
+                return bulkLookup;
+            }
+        };
     }
 
     /**

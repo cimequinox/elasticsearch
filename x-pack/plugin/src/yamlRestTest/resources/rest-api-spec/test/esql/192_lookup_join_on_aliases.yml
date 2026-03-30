@@ -20,6 +20,16 @@ setup:
                 type: keyword
   - do:
       indices.create:
+        index: test2
+        body:
+          mappings:
+            properties:
+              key:
+                type: long
+              test2color:
+                type: keyword
+  - do:
+      indices.create:
         index: test-mv
         body:
           mappings:
@@ -102,6 +112,15 @@ setup:
           - { "key": 1, "color": "red" }
           - { "index": { } }
           - { "key": 2, "color": "blue" }
+  - do:
+      bulk:
+        index: "test2"
+        refresh: true
+        body:
+          - { "index": { } }
+          - { "key": 3, "test2color": "cyan" }
+          - { "index": { } }
+          - { "key": 4, "test2color": "blue" }
   - do:
       bulk:
         index: "test-lookup-1"
@@ -252,3 +271,24 @@ alias-pattern-single:
   - match: {columns.1.type: "keyword"}
   - match: {values.0: [1, "cyan"]}
   - match: {values.1: [2, "yellow"]}
+
+---
+alias-expression-based-join:
+  - requires:
+      capabilities:
+        - method: POST
+          path: /_query
+          capabilities: [ join_lookup_v12 ]
+      reason: "uses LOOKUP JOIN"
+  - do:
+      esql.query:
+        body:
+          query: 'FROM test2 | LOOKUP JOIN test-lookup-alias ON test2color == color | LIMIT 10'
+
+  - match: {columns.0.name: "test2color"}
+  - match: {columns.0.type: "keyword"}
+  - match: {columns.1.name: "color"}
+  - match: {columns.1.type: "keyword"}
+  - match: {columns.2.name: "key"}
+  - match: {columns.2.type: "long"}
+  - match: {values.0: ["cyan", "cyan", 1]}
